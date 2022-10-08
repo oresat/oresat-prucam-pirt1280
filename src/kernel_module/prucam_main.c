@@ -11,12 +11,7 @@
 #include <linux/moduleparam.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
-#include "ar013x_regs.h"
-#include "ar0130_ctrl_regs.h"
-#include "ar0134_ctrl_regs.h"
-#include "ar013x_sysfs.h"
 #include "cam_gpio.h"
-#include "cam_i2c.h"
 
 
 MODULE_LICENSE("GPL");
@@ -209,7 +204,7 @@ static int __init prucam_init(void) {
     printk(KERN_INFO "prucam: device class registered correctly\n");
 
     // Register the device driver
-    prucamDevice = device_create_with_groups(prucamClass, NULL, MKDEV(majorNumber, 0), NULL, ar013x_groups, DEVICE_NAME);
+    prucamDevice = device_create(prucamClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
 
     //set interrupt to not triggered yet
     int_triggered = 0;
@@ -277,14 +272,14 @@ static int pru_handshake(int physAddr) {
 
     //ioremap physical locations in the PRU shared ram 
     void __iomem *pru_shared_ram;
-    pru_shared_ram = ioremap_nocache((int)PRUSHAREDRAM, 4); 
+    pru_shared_ram = ioremap((int)PRUSHAREDRAM, 4);
 
     //write physical address to PRU shared RAM where a PRU can find it
     writel(physAddr, pru_shared_ram);
 
     //ioremap PRU SRSR0 reg
     void __iomem *pru_srsr0;
-    pru_srsr0 = ioremap_nocache((int)(PRUBASE + PRUINTC_OFFSET + SRSR0_OFFSET), 4); 
+    pru_srsr0 = ioremap((int)(PRUBASE + PRUINTC_OFFSET + SRSR0_OFFSET), 4);
 
     //set bit 24 in PRU SRSR0 to trigger event 24
     writel(0x1000000, pru_srsr0);
