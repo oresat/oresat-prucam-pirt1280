@@ -1,0 +1,1 @@
+cmd_/home/ryan/PSAS/repos/oresat-prucam-pirt1280/src/kernel_module/Module.symvers := sed 's/ko$$/o/' /home/ryan/PSAS/repos/oresat-prucam-pirt1280/src/kernel_module/modules.order | scripts/mod/modpost  -a  -o /home/ryan/PSAS/repos/oresat-prucam-pirt1280/src/kernel_module/Module.symvers -e -i Module.symvers  -N -T -
