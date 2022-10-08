@@ -215,3 +215,7 @@ bb.org-overlays/
 *.o.cmd
 *.ko.cmd
 *.pybuild/
+
+.Module.symvers.cmd
+
+read_prucam
