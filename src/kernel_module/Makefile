@@ -1,5 +1,5 @@
 obj-m += prucam.o
-prucam-objs := prucam_main.o cam_gpio.o
+prucam-objs := prucam_main.o
 mod_name=prucam.ko
 ccflags-y := -std=gnu99 -Wno-declaration-after-statement #this disables the C90 warnings
 
