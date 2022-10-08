@@ -1,98 +1,47 @@
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/device.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/uaccess.h>
-#include <linux/dma-mapping.h>
-#include <linux/interrupt.h>
-#include <linux/platform_device.h>
 #include <linux/delay.h>
-#include <linux/moduleparam.h>
+#include <linux/device.h>
+#include <linux/dma-mapping.h>
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/interrupt.h>
+#include <linux/kernel.h>
 #include <linux/kobject.h>
+#include <linux/miscdevice.h>
+#include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/sysfs.h>
-#include "cam_gpio.h"
+#include <linux/uaccess.h>
 
+#include "cam_gpio.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Oliver Rew");
 MODULE_DESCRIPTION("Interface to a PRU and a camera");
-MODULE_VERSION("0.3.2");
+MODULE_VERSION("0.1.0");
 
 
-#define DEVICE_NAME     "prucam"    // The device will appear at /dev/prucam 
-#define CLASS_NAME      "pru"       // The device class -- this is a character device driver
 #define ROWS            1024
 #define COLS            1280 * 2 // 2 bytes / pixel
-#define FRAME_BYTES          (ROWS * COLS)
+#define FRAME_BYTES     (ROWS * COLS)
 #define PRUBASE         0x4a300000
 #define PRUSHAREDRAM    (PRUBASE + 0x10000)
 #define PRUINTC_OFFSET  0x20000
 #define SRSR0_OFFSET    0x200
 #define NUM_IRQS        8
-#define CONTEXT_A       0
-#define CONTEXT_B       1
 
 
-/** Stores the device number -- determined automatically */
-static int majorNumber;
-/** The device-driver class struct pointer */
-static struct class* prucamClass = NULL;
-/** The device-driver device struct pointer */
-static struct device* prucamDevice = NULL;
-uint16_t digital_binning = 0;
-DEFINE_MUTEX(cam_mtx);
-
-static int      dev_open(struct inode *, struct file *);
-static int      dev_release(struct inode *, struct file *);
-static ssize_t  dev_read(struct file *, char *, size_t, loff_t *);
-static int      pru_handshake(int physAddr);
-static irq_handler_t    irqhandler(unsigned int irq, void *dev_id, struct pt_regs *regs);
-int             pru_probe(struct platform_device*);
-int             pru_remove(struct platform_device*);
-static void     free_irqs(void);
-
-
-/**
- * TODO - dedicated error interrupt line from PRU that triggers handler to shut down
- *   other opperations
- */
-static struct file_operations fops = {
-    .open = dev_open,
-    .read = dev_read,
-    .release = dev_release,
-};
-
-
-//Memory pointers
+// private data
+struct miscdevice miscdev;
+struct mutex mutex;
 dma_addr_t dma_handle = (dma_addr_t)NULL;
 int *cpu_addr = NULL;
-int* physAddr = NULL;
+int *phys_addr = NULL;
 volatile int int_triggered = 0;
 
-
-static const struct of_device_id my_of_ids[] = {
-    { .compatible = "prudev,prudev" },
-    { },
-};
-
-
-static struct platform_driver prudrvr = {
-    .driver = {
-        .name = "prudev",
-        .owner = THIS_MODULE,
-        .of_match_table = my_of_ids
-    },
-    .probe = pru_probe,
-    .remove = pru_remove,
-};
-
-
 typedef struct {
-    char* name;
-    int   num;
-}irq_info;
-
+    char *name;
+    int num;
+} irq_info;
 
 /**
  * mapping of an irq name(from the platfor device in the device device-tree)
@@ -100,6 +49,7 @@ typedef struct {
  * successfully retrieved and requested, the 'num' will be assigned.
  */
 irq_info irqs[] = {
+    // clang-format off
     {"20", -1},
     {"21", -1},
     {"22", -1},
@@ -108,156 +58,20 @@ irq_info irqs[] = {
     {"25", -1},
     {"26", -1},
     {"27", -1}
+    // clang-format on
 };
 
-
-int pru_probe(struct platform_device* dev) {
-    int ret = 0; // return value
-    int irq;
-    printk(KERN_INFO "prucam: probing %s\n", dev->name);
-
-    if(prucamDevice == NULL){
-        printk(KERN_ERR "prucamDevice NULL!\n");
-        return -1;
-    }
-
-    for(int i = 0 ; i < NUM_IRQS ; i++) {
-        irq = platform_get_irq_byname(dev, irqs[i].name);
-        printk(KERN_INFO "prucam: platform_get_irq(%s) returned: %d\n", irqs[i].name, irq);
-        if(irq < 0)
-            return irq;
-
-        ret = request_irq(irq, (irq_handler_t)irqhandler, IRQF_TRIGGER_RISING, "prudev", NULL);
-        printk(KERN_INFO "prucam: request_irq(%d) returned: %d\n", irq, ret);
-        if(ret < 0)
-            return ret;
-
-        irqs[i].num = irq;
-    }
-
-    //set DMA mask
-    ret = dma_set_coherent_mask(prucamDevice, 0xffffffff);
-    if(ret != 0) {
-        printk(KERN_INFO "Failed to set DMA mask : error %d\n", ret);
-        return 0;
-    }
-
-    /**
-     * I initial used GFP_DMA flag below, but I could not allocate >1 MiB
-     * I am unsure what the ideal flags for this are, but GFP_KERNEL seems to
-     * work
-     */
-    cpu_addr = dma_alloc_coherent(prucamDevice, FRAME_BYTES, &dma_handle, GFP_KERNEL);
-    if(cpu_addr == NULL) {
-        printk(KERN_INFO "Failed to allocate memory\n");
-        return -1;
-    }
-
-    printk(KERN_INFO "prucam: virtual Address: %p\n", cpu_addr);
-
-    physAddr = (int*)dma_handle;
-    printk(KERN_INFO "prucam: physical Address: %p\n", physAddr);
-    int_triggered = 0;
-
-    return 0;
-}
-
-
-int pru_remove(struct platform_device* dev) {
-    // free irqs alloc'd in the probe
-    free_irqs();
-
-    dma_free_coherent(prucamDevice, FRAME_BYTES, cpu_addr, dma_handle);
-    printk(KERN_INFO "prucam: Freed %d bytes\n", FRAME_BYTES); 
-
-    return 0;
-}
-
-
-/** 
- * @brief The LKM initialization function
- * The static keyword restricts the visibility of the function to within this C file. The __init
- * macro means that for a built-in driver (not a LKM) the function is only used at initialization
- * time and that it can be discarded and its memory freed up after that point.
- * @return returns 0 if successful
- */
-static int __init prucam_init(void) {
-    int regDrvr;
-
-    printk(KERN_INFO "prucam: Initializing the prucam v1\n");
-
-    // Try to dynamically allocate a major number for the device -- more difficult but worth it
-    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
-    if(majorNumber<0){
-        printk(KERN_ALERT "prucam failed to register a major number\n");
-        return majorNumber;
-    }
-    printk(KERN_INFO "prucam: registered correctly with major number %d\n", majorNumber);
-
-    // Register the device class
-    prucamClass = class_create(THIS_MODULE, CLASS_NAME);
-    if(IS_ERR(prucamClass)){                // Check for error and clean up if there is
-        unregister_chrdev(majorNumber, DEVICE_NAME);
-        printk(KERN_ALERT "Failed to register device class\n");
-        return PTR_ERR(prucamClass);          // Correct way to return an error on a pointer
-    }
-    printk(KERN_INFO "prucam: device class registered correctly\n");
-
-    // Register the device driver
-    prucamDevice = device_create(prucamClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-
-    //set interrupt to not triggered yet
-    int_triggered = 0;
-
-    if(IS_ERR(prucamDevice)) { // Clean up if there is an error
-        class_destroy(prucamClass); // Repeated code but the alternative is goto statements
-        unregister_chrdev(majorNumber, DEVICE_NAME);
-        printk(KERN_ALERT "Failed to create the device\n");
-        return PTR_ERR(prucamDevice);
-    }
-    printk(KERN_INFO "prucam: device class created correctly\n"); // Made it! device was initialized
-
-    /**
-     * Register the platform driver. This causes the system the scan the platform
-     * bus for devices that match this driver. As defined in the device-tree,
-     * there should be a platform device that is found, at which point the
-     * drivers probe function is called on the device and the driver can read and
-     * request the interrupt line associated with that device
-     */
-    regDrvr = platform_driver_register(&prudrvr);
-    printk(KERN_INFO "prucam: platform driver register returned: %d\n", regDrvr);
-
-    // AR0130 datasheet says sleep for a little bit after enabled vregs and clock
-    msleep(10);
-
-    printk(KERN_INFO "Init Complete\n");
-    return 0;
-}
-
-
-static void __exit prucam_exit(void) {
-    //unregister platform driver
-    platform_driver_unregister(&prudrvr);
-
-    device_destroy(prucamClass, MKDEV(majorNumber, 0));     // remove the device
-    class_destroy(prucamClass);                             // remove the device class
-    unregister_chrdev(majorNumber, DEVICE_NAME);            // unregister the major number
-
-    printk(KERN_INFO "prucam: module exit\n");
-}
-
-
-static void free_irqs(void){
+static void free_irqs(void)
+{
     for(int i = 0 ; i < NUM_IRQS ; i++)
         if(irqs[i].num > -1)
           free_irq(irqs[i].num, NULL);
 }
 
-
-static int dev_open(struct inode *inodep, struct file *filep){
+static int dev_open(struct inode *inodep, struct file *filep)
+{
     return 0;
 }
-
 
 /** 
  * Writes directly to the the PRU SRSR0 register that manually
@@ -268,25 +82,26 @@ static int dev_open(struct inode *inodep, struct file *filep){
  * should be ok, but in the future I should set aside of piece of PRU shared
  * RAM to ensure it doesn't accidentally use it
  */
-static int pru_handshake(int physAddr) {
+static int pru_handshake(int phys_addr)
+{
 
-    //ioremap physical locations in the PRU shared ram 
+    // ioremap physical locations in the PRU shared ram 
     void __iomem *pru_shared_ram;
     pru_shared_ram = ioremap((int)PRUSHAREDRAM, 4);
 
-    //write physical address to PRU shared RAM where a PRU can find it
-    writel(physAddr, pru_shared_ram);
+    // write physical address to PRU shared RAM where a PRU can find it
+    writel(phys_addr, pru_shared_ram);
 
-    //ioremap PRU SRSR0 reg
+    // ioremap PRU SRSR0 reg
     void __iomem *pru_srsr0;
     pru_srsr0 = ioremap((int)(PRUBASE + PRUINTC_OFFSET + SRSR0_OFFSET), 4);
 
-    //set bit 24 in PRU SRSR0 to trigger event 24
+    // set bit 24 in PRU SRSR0 to trigger event 24
     writel(0x1000000, pru_srsr0);
 
-    //TODO add a response via an interrupt from the PRU and return error
+    // TODO add a response via an interrupt from the PRU and return error
 
-    //unmap iomem
+    // unmap iomem
     iounmap(pru_shared_ram);
     iounmap(pru_srsr0);
 
@@ -294,35 +109,34 @@ static int pru_handshake(int physAddr) {
 }
 
 
-static ssize_t dev_read(
-        struct file *filep,
-        char *buffer,
-        size_t len,
-        loff_t *offset) {
+static ssize_t dev_read(struct file *filep, char *buffer, size_t len,
+                        loff_t *offset) 
+{
 
     int handshake;
     char* physBase;
     int err = 0;
     int_triggered = 0; // init int_triggered to false on read start
 
-    //TODO address to known location with checksum to other location this can replace the handshake
+    // TODO address to known location with checksum to other location this can
+    // replace the handshake
     
-    mutex_lock(&cam_mtx);
+    mutex_lock(&mutex);
 
-    //signal PRU and tell it where to write the data
-    handshake = pru_handshake((int)physAddr);
+    // signal PRU and tell it where to write the data
+    handshake = pru_handshake((int)phys_addr);
     if(handshake < 0)  {
-        printk(KERN_ERR "PRU Handshake failed: %p\n", physAddr);
-        mutex_unlock(&cam_mtx);
+        printk(KERN_ERR "PRU Handshake failed: %p\n", phys_addr);
+        mutex_unlock(&mutex);
         return -1;
     }
 
-    //wait for intc to be triggered
+    // wait for intc to be triggered
     for(volatile int i = 0; i < (1<<27) && !int_triggered; i++);
 
     if(!int_triggered) {
         printk(KERN_ERR "Interrupt never triggered!\n");
-        mutex_unlock(&cam_mtx);
+        mutex_unlock(&mutex);
         return -1;
     }
 
@@ -331,29 +145,27 @@ static ssize_t dev_read(
 
     physBase = (char*)cpu_addr;
 
-    err = copy_to_user(buffer, physBase, FRAME_BYTES); //TODO use __copy_to_user
+    err = copy_to_user(buffer, physBase, FRAME_BYTES); // TODO use __copy_to_user
     if(err != 0) {
-        mutex_unlock(&cam_mtx);
+        mutex_unlock(&mutex);
         return -EFAULT;
     }
 
-    mutex_unlock(&cam_mtx);
+    mutex_unlock(&mutex);
 
     return 0;
 }
 
 
-static irq_handler_t irqhandler(
-        unsigned int irqN,
-        void *dev_id,
-        struct pt_regs *regs) {
-
-    printk(KERN_INFO "prucam: IRQ_HANDLER: %d\n", irqN); //TODO get rid of this
-
+static irq_handler_t irqhandler(unsigned int irq_num, void *dev_id,
+                                struct pt_regs *regs)
+{
     //signal that interrupt has been triggered
     int_triggered = 1;
 
-    return (irq_handler_t) IRQ_HANDLED;
+    printk(KERN_INFO "prucam: irq %d handled.\n", irq_num);
+
+    return (irq_handler_t)IRQ_HANDLED;
 }
 
 
@@ -363,11 +175,130 @@ static irq_handler_t irqhandler(
  * @param inodep A pointer to an inode object (defined in linux/fs.h)
  * @param filep A pointer to a file object (defined in linux/fs.h)
  */
-static int dev_release(struct inode *inodep, struct file *filep){
+static int dev_release(struct inode *inodep, struct file *filep)
+{
     printk(KERN_INFO "prucam: Device successfully closed\n");
     return 0;
 }
 
+/**
+ * TODO - dedicated error interrupt line from PRU that triggers handler to shut
+ * down other opperations
+ */
+static const struct file_operations prucam_fops = {
+    .owner   = THIS_MODULE,
+    .open    = dev_open,
+    .read    = dev_read,
+    .release = dev_release,
+};
 
-module_init(prucam_init);
-module_exit(prucam_exit);
+static int prucam_probe(struct platform_device *pdev)
+{
+    struct device *dev;
+    struct device_node *node = pdev->dev.of_node;
+    int ret, irq;
+
+    if (!node)
+        return -ENODEV; /* No support for non-DT platforms */
+
+    /* Get a handle to the PRUSS structures */
+    dev = &pdev->dev;
+
+    /* Get interrupts and install interrupt handlers */
+    for (int i = 0; i < NUM_IRQS; i++) {
+        irq = platform_get_irq_byname(pdev, irqs[i].name);
+        if (irq < 0) {
+            ret = irq;
+            dev_err(dev, "Unable to get irq %s: %d\n", irqs[i].name, ret);
+            goto error_get_irq;
+        }
+
+        /* Save irq numbers for freeing */
+        irqs[i].num = irq;
+
+        ret = request_irq(irq, (irq_handler_t)irqhandler, IRQF_TRIGGER_RISING,
+                          dev_name(dev), NULL);
+        if (ret < 0) {
+            dev_err(dev, "Unable to request irq %s: %d\n", irqs[i].name, ret);
+            goto error_request_irq;
+        }
+    }
+
+    // set DMA mask
+    ret = dma_set_coherent_mask(dev, 0xffffffff);
+    if (ret) {
+        dev_err(dev, "Failed to set DMA mask : error %d\n", ret);
+        goto error_dma_set;
+    }
+
+     // I initial used GFP_DMA flag below, but I could not allocate >1 MiB
+     // I am unsure what the ideal flags for this are, but GFP_KERNEL seems to
+     // work
+    cpu_addr = dma_alloc_coherent(dev, FRAME_BYTES, &dma_handle, GFP_KERNEL);
+    if (!cpu_addr) {
+        dev_err(dev, "Failed to allocate DMA\n");
+        ret = -1;
+        goto error_dma_alloc;
+    }
+
+    printk(KERN_INFO "prucam: virtual address: %p\n", cpu_addr);
+
+    phys_addr = (int *)dma_handle;
+    printk(KERN_INFO "prucam: physical dddress: %p\n", phys_addr);
+    int_triggered = 0;
+
+    // add misc device for file ops
+    miscdev.fops = &prucam_fops;
+    miscdev.minor = MISC_DYNAMIC_MINOR;
+    miscdev.mode = S_IRUGO;
+    miscdev.name = "prucam";
+    ret = misc_register(&miscdev);
+    if (ret)
+        goto error_misc;
+
+    mutex_init(&mutex);
+
+    printk("prucam probe complete");
+    return 0;
+
+error_misc:
+    dma_free_coherent(dev, FRAME_BYTES, cpu_addr, dma_handle);
+error_dma_alloc:
+error_dma_set:
+error_get_irq:
+    free_irqs();
+error_request_irq:
+    printk("prucam probe failed with: %d\n", ret);
+    return ret;
+}
+
+static int prucam_remove(struct platform_device *pdev)
+{
+    struct device *dev = &pdev->dev;
+    
+    misc_deregister(&miscdev);
+
+    dma_free_coherent(dev, FRAME_BYTES, cpu_addr, dma_handle);
+
+    free_irqs();
+
+    printk("prucam removed\n");
+    return 0;
+}
+
+static const struct of_device_id prucam_of_ids[] = {
+    { .compatible = "prudev,prudev"},
+    { /* sentinel */ },
+};
+MODULE_DEVICE_TABLE(of, prucam_of_ids);
+
+static struct platform_driver prucam_driver = {
+    .driver = {
+        .name = "prudev",
+        .owner = THIS_MODULE,
+        .of_match_table = prucam_of_ids,
+    },
+    .probe = prucam_probe,
+    .remove = prucam_remove,
+};
+module_platform_driver(prucam_driver);
