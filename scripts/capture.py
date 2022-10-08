@@ -38,7 +38,6 @@ ok, img = cv2.imencode('.png', img, params=[cv2.CV_16U])
 if not(ok):
     raise BaseException('encoding error')
 
-
 # write image
-with open('capt.png', 'wb') as f:
+with open('capture.png', 'wb') as f:
     f.write(img)
