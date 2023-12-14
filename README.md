@@ -33,7 +33,6 @@ firmware binaries to be installed to work, so build and insert it last.
 - Install dependencies: `$ sudo apt install ti-pru-cgt-v2.3 ti-pru-software-v6.0`
 - Compile binaries for both PRUs: `$ make`
 - Install binaries for both PRUs: `$ sudo make install`
-- Start PRUs: `$ sudo ./deploy.sh`
 
 ### Kernel module
 
@@ -47,23 +46,23 @@ firmware binaries to be installed to work, so build and insert it last.
 - `$ cd scripts`
 - Install dependencies: `$ pip install -r requirements.txt`
 - Capture image:`$ sudo ./capture.py`
-  - This will produce `capture.png`
+  - This will produce `img.png`
 
 ## Debian package
 
-`prucam-dkms` is the kernel module that provides the sysfs interfaces to the
-pru and ar013x camera settings. This package will also install the compiled
-both PRUs firmware and the prucam dtbo. **NOTE** when install, it will auto
-load the module.
+`prucam-pirt1280-dkms` is the kernel module that provides the sysfs
+interfaces to the pru and ar013x camera settings. This package will also
+install the compiled both PRUs firmware and the prucam dtbo. **NOTE** when
+install, it will auto load the module.
 
-To build `prucam-dkms`:
+To build `prucam-pirt1280-dkms`:
 
 - Install build dependencies: ``$ sudo apt install --no-install-recommends
   --no-install-suggestions debhelper fakeroot dkms linux-headers-`uname -r`
   device-tree-compiler ti-pru-cgt-v2.3 ti-pru-software-v6.0``
   - The `--no-install-*` flags are due to `dkms` installing `linux-headers`
     package for the wrong kernel version
-- Build `prucam` Debian packages: `$ dpkg-buildpackage -us -uc`
+- Build prucam Debian package: `$ ./makedeb.sh`
 
 [TI PRU-ICSS webpage]:https://processors.wiki.ti.com/index.php/PRU-ICSS
 [AM335x]:https://www.ti.com/processors/sitara-arm/am335x-cortex-a8/overview.html

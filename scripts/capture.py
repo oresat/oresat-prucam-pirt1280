@@ -43,5 +43,5 @@ if not (ok):
     raise BaseException("encoding error")
 
 # write image
-with open("capture.png", "wb") as f:
+with open("img.png", "wb") as f:
     f.write(img)
