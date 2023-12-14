@@ -4,43 +4,113 @@
 /plugin/;
 
 / {
-  // disable the P1_28_pinmux as we define our own
+  compatible = "ti,beaglebone", "ti,beaglebone-black", "ti,beaglebone-green";
+
+  // identification
+  part-number = "PRUCAM";
+  version = "00A0";
+
   fragment@0 {
     target = <&ocp>;
     __overlay__ {
-      P1_35_pinmux { status = "disabled"; };	/* gpio0_13.uart1_rtsn */
-      P2_35_pinmux { status = "disabled"; };	/* gpio0_13.uart1_rtsn */
+      // Sensor Enable, LCD_VSYNC, gpio2_22, Linux GPIO 86
+      P2_35_pinmux { status = "disabled"; };
+      // TEC enable, LCD_PCLK, gpio2_24, Linux GPIO 88
+      P1_35_pinmux { status = "disabled"; };
     };
   };
 
   fragment@1 {
     target-path="/";
     __overlay__ {
-      /* Add default settings for the LA core */
       prudev {
-        compatible = "prudev,prudev";
-        samplerate = <50000000>;	/* All (100 / n) MHz sample rates, = 1,2,... */ // TODO remove
-        sampleunit = <1>;		/* 0:16-bit samples, 1:8-bit samples */
-        triggerflags = <0>; 		/* 0:one-shot, 1:continuous */
+        compatible = "prucam,prucam";
 
-        pruss = <&pruss>;
+        ti,prus = <&pru0>, <&pru1>;
         interrupt-parent = <&pruss_intc>;
-        interrupts = <20>, <21>, <22>, <23>, <24>, <25>, <26>, <27>;
-        interrupt-names = "20", "21", "22", "23", "24", "25", "26", "27";
+
+        /**
+         * Map PRU events to host interupts. The first number is the PRU
+         * system event, the second is the PRU INTC channel, and the third is
+         * the PRU INTC host interrupt. Host interrupts 0 and 1 are mapped to
+         * R31 bit 30 and 31, respectively. Host interrupts 2-9 are sent to the
+         * AM335x interrupt controller. PRU system events 16-31 can be manually
+         * triggered by writing to R31 from a PRU (see TRM section 4.4.1.2.2)
+         * or by writing the SRSR0 register (done by the kernel driver). See
+         * AM335x TRM section 4.4.2 for more information about PRU interrupts.
+         *
+         * PRU1 to ARM Interrupt:
+         * Maps system event 18 to channel 2 to host 2, which is connected to
+         * AM335x hardware interrupt #20. Triggering system event 18 will
+         * trigger AM335X interrupt #20. This is used by PRU1 to notify the
+         * kernel that the current frame has been written to the shared buffer
+         * and can now be read.
+         *
+         * ARM to PRUs Interrupt :
+         * Maps system event 16 to channel 0 to host 0, which is connected to
+         * R31 bit 30 of each PRU. Triggering system event 16 will set bit 30
+         * of R31. This is used by the kernel driver to tell the PRUs to start
+         * capturing a frame.
+         *
+         * PRU0 to PRU1 Interrupt :
+         * Maps system event 17 to channel 1 to host 1, which is connected to
+         * R31 bit 31 of each PRU. Triggering system event 17 will set bit 31
+         * of R31. This is used by PRU0 to notify PRU1 that the current image
+         * chunk can be read from the register bank.
+         */
+        interrupts = <18 2 2>, <16 0 0>, <17 1 1>;
+        interrupt-names = "pru1_to_arm", "arm_to_prus", "pru0_to_pru1";
       };
     };
   };
 
-  // overlay the pinmux with the pin modes we need
+  // overlay to enable camera GPIO
   fragment@2 {
+    target = <&ocp>;
+    __overlay__ {
+      cape-universal {
+        compatible = "gpio-of-helper";
+        status = "okay";
+        pinctrl-names = "default";
+        pinctrl-0 = <&camera_pins>; /* this must point to pinmux name below */
+
+        sensor_enable {
+          gpio-name = "sensor_eanble";
+          gpio = <&gpio2 22 0>; /* LCD_VSYNC */
+          output;
+        };
+        tec_enable {
+          gpio-name = "tec_enable";
+          gpio = <&gpio2 24 0>; /* LCD_PCLK */
+          output;
+        };
+      };
+    };
+  };
+
+  // overlay to enable GPIO, PRU
+  fragment@3 {
     target = <&am33xx_pinmux>;
     __overlay__ {
-      cfc_pins: pinmux_cfc_pins {
-            pinctrl-single,pins = <
-              AM33XX_IOPAD(AM335X_PIN_LCD_VSYNC, PIN_OUTPUT_PULLDOWN | INPUT_EN | MUX_MODE7)
-              AM33XX_IOPAD(AM335X_PIN_LCD_PCLK, PIN_OUTPUT_PULLDOWN | INPUT_EN | MUX_MODE7)
-              >;
-      };
+
+      camera_pins: camera_pins {
+        #gpio-cells = <2>;
+        pinctrl-single,pins = <
+        /* Output pins for sensor and TEC control */
+        AM33XX_IOPAD(AM335X_PIN_LCD_PCLK, PIN_OUTPUT | MUX_MODE7)   /* TEC enable, LCD_PCLK, gpio2_24 (mode 7), Linux GPIO 88 */
+        AM33XX_IOPAD(AM335X_PIN_LCD_VSYNC, PIN_OUTPUT | MUX_MODE7)  /* Sensor Enable, LCD_VSYNC, gpio2_22 (mode 7), Linux GPIO 86 */
+
+        /* Pins for camera parallel bus. 8 data bits + 1 clock bit */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_ACLKX, PIN_INPUT | MUX_MODE6)      /* mcasp0_aclkx == pru0_r31_0 == camera D4 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_FSX, PIN_INPUT | MUX_MODE6)        /* mcasp0_fsx == pru0_r31_1 == camera D5 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_AXR0, PIN_INPUT | MUX_MODE6)       /* mcasp0_axr0 == pru0_r31_2 == camera D6 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_AHCLKR, PIN_INPUT | MUX_MODE6)     /* mcasp0_ahclkr == pru0_r31_3 == camera D7 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_ACLKR, PIN_INPUT | MUX_MODE6)      /* mcasp0_aclkr == pru0_r31_4 == camera D8 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_FSR, PIN_INPUT | MUX_MODE6)        /* mcasp0_fsr == pru0_r31_5 == camera D9 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_AXR1, PIN_INPUT | MUX_MODE6)       /* mcasp0_axr1 == pru0_r31_6 == camera D10 */
+        AM33XX_IOPAD(AM335X_PIN_MCASP0_AHCLKX, PIN_INPUT | MUX_MODE6)     /* mcasp0_ahclkx == pru0_r31_7 == camera D11 */
+        AM33XX_IOPAD(AM335X_PIN_XDMA_EVENT_INTR1, PIN_INPUT | MUX_MODE5)  /* xdma_event_intr1 == pru0_r31_16 == camera pixel clock */
+        >; };
     };
   };
 };

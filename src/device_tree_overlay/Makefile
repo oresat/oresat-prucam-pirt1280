@@ -1,6 +1,4 @@
-SOURCES = \
-	prudev-00A0.dts \
-	cfc-00A0.dts
+SOURCES = cfc-00A0.dts
 
 DTC_FLAGS= -Wno-unit_address_vs_reg -Wno-chosen_node_is_root -Wno-alias_paths
 DTBOS = $(SOURCES:%.dts=%.dtbo)
