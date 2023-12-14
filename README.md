@@ -3,7 +3,7 @@
 Kernel module, device tree overlay, and PRU firmware to interface to the
 PIRT1280 camera using the PRUs on the [AM335x].
 
-_**NOTE:**_ This was tested on Debian with kernel 4.14 and 4.19.
+_**NOTE:**_ This was tested on Debian with 5.10 kernel.
 
 ## What is a PRU?
 
@@ -22,7 +22,7 @@ firmware binaries to be installed to work, so build and insert it last.
 - Compile dtbo: `$ make -C src/device_tree_overlay`
 - Install dtbo: `$ sudo make -C src/device_tree_overlay install`
 - Edit `/boot/uEnv.txt`
-  - Change the `#dtb_overlay=<file8>.dtbo` line to `dtb_overlay=/lib/firmware/prudev-00A0.dtbo`
+  - Change the `#dtb_overlay=<file8>.dtbo` line to `dtb_overlay=/lib/firmware/cfc-00A0.dtbo`
   - Make sure the correct pru rproc `uboot_overlay_pru=` line is not commented
   out (depends kernel version).
   - Make sure the `#enable_uboot_cap_universal=` line is commented out.
