@@ -1,7 +1,7 @@
 Source: prucam-pirt1280
 Maintainer: PSAS <oresat@pdx.edu>
 Build-Depends: debhelper (>= 10), dkms, device-tree-compiler, ti-pru-cgt-v2.3, ti-pru-software-v6.0, fakeroot
-Homepage: https://github.com/oresat/oresat-linux-prucam
+Homepage: https://github.com/oresat/oresat-prucam-pirt1280
 
 Package: prucam-pirt1280-dkms
 Architecture: armhf

@@ -191,31 +191,32 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# prucam firmware
-*.out
-
-# others
-test_camera
-
 # pru firmware
 pru_fw.asm
 gen/
+*.out
 
 # debhelper
 .debhelper/
 *.debhelper*
 *.substvars
-prucam-dkms_*
+prucam-pirt1280-dkms_*
 debhelper-build-stamp
 files
-prucam-dkms/
-python3-prucam/
+prucam-pirt1280-dkms/
+*.deb
+changelog
+
+# device tree overlay
 *.dtbo
+*.dts.tmp
 bb.org-overlays/
+
+# kernel module
 *.o.cmd
 *.ko.cmd
-*.pybuild/
-
 .Module.symvers.cmd
 
+# binaries
 read_prucam
+test_camera

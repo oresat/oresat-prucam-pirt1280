@@ -4,7 +4,7 @@ set -e
 # The original file can be found in template-dkms-mkdeb/debian/postinst
 # in the DKMS tarball, check it for copyright notices.
 
-DKMS_NAME=prucam
+DKMS_NAME=prucam-pirt1280
 DKMS_PACKAGE_NAME=$DKMS_NAME-dkms
 DKMS_VERSION=0.1.0
 
