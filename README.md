@@ -18,6 +18,8 @@ firmware binaries to be installed to work, so build and insert it last.
 
 ### Device tree overlay
 
+**NOTE:** For development only. Flight will use a custom device tree.
+
 - Install dependencies: `$ sudo apt install device-tree-compiler`
 - Compile dtbo: `$ make -C src/device_tree_overlay`
 - Install dtbo: `$ sudo make -C src/device_tree_overlay install`
