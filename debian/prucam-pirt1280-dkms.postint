@@ -32,4 +32,3 @@ esac
 
 systemctl daemon-reload
 systemctl enable prucam
-systemctl restart prucam
