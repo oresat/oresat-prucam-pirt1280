@@ -328,7 +328,7 @@ static int prucam_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id prucam_of_ids[] = {
-    { .compatible = "prucam,prucam"},
+    { .compatible = "psas,prucam-pirt1280" },
     { /* sentinel */ },
 };
 

@@ -1,11 +1,10 @@
 [Unit]
-Description=Install prucam kernel module
+Description=Build and insert the prucam kernel module
 
 [Service]
 Type=oneshot
 User=root
-ExecStart=/bin/sleep 20
-ExecStart=insmod /usr/src/prucam/prucam.ko
+ExecStart=/opt/prucam.sh 20
 
 [Install]
 WantedBy=multi-user.target
